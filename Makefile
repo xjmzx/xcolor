@@ -2,7 +2,10 @@ DESTDIR =
 PREFIX = /usr/local
 CARGO_FLAGS =
 
-.PHONY: all gui install install-gui install-all uninstall help FORCE
+.PHONY: all gui icons install install-gui install-all uninstall help FORCE
+
+# hicolor raster sizes generated from the source SVGs.
+ICON_SIZES = 16 24 32 48 256 512
 
 all: target/release/xcolor
 
@@ -19,6 +22,35 @@ target/release/ncover: FORCE
 
 FORCE:
 
+# Regenerate the hicolor PNG raster sets (run once per icon change). Suite icon
+# convention: cover-sq -> icon.svg (ncover), color-sq -> icon-xcolor.{svg,png}
+# (xcolor). Two different sources on purpose:
+#   ncover — icon.svg is a plain path SVG, rasterised by rsvg-convert
+#            (librsvg2-bin) or ImageMagick's `convert`.
+#   xcolor — icon-xcolor.svg is a Figma *angular/conic-gradient* colour wheel
+#            (foreignObject + CSS conic-gradient); NEITHER librsvg nor
+#            ImageMagick can render it — and for the same reason GTK can't use
+#            it as a scalable icon at runtime. Its rasters are downscaled from
+#            the Figma-rendered master PNG (icon-xcolor.png) instead. Keep the
+#            .svg as the design source of record; the .png is the raster master.
+icons:
+	@for s in $(ICON_SIZES); do \
+	  out="extra/icons/ncover-$$s.png"; \
+	  if command -v rsvg-convert >/dev/null 2>&1; then \
+	    rsvg-convert -w $$s -h $$s icon.svg -o "$$out"; \
+	  elif command -v convert >/dev/null 2>&1; then \
+	    convert -background none -resize $${s}x$${s} icon.svg "$$out"; \
+	  else \
+	    echo "need rsvg-convert (librsvg2-bin) or imagemagick"; exit 1; \
+	  fi; \
+	done; \
+	echo "regenerated extra/icons/ncover-*.png from icon.svg"
+	@command -v convert >/dev/null 2>&1 || { echo "need imagemagick to downscale xcolor"; exit 1; }
+	@for s in $(ICON_SIZES); do \
+	  convert icon-xcolor.png -resize $${s}x$${s} "extra/icons/xcolor-$$s.png"; \
+	done; \
+	echo "regenerated extra/icons/xcolor-*.png from icon-xcolor.png (Figma render)"
+
 install: target/release/xcolor
 	install -s -D -m755 -- target/release/xcolor "$(DESTDIR)$(PREFIX)/bin/xcolor"
 	install -D -m644 -- man/xcolor.1 "$(DESTDIR)$(PREFIX)/share/man/man1/xcolor.1"
@@ -29,6 +61,9 @@ install: target/release/xcolor
 	install -D -m644 -- extra/icons/xcolor-48.png "$(DESTDIR)$(PREFIX)/share/icons/hicolor/48x48/apps/xcolor.png"
 	install -D -m644 -- extra/icons/xcolor-256.png "$(DESTDIR)$(PREFIX)/share/icons/hicolor/256x256/apps/xcolor.png"
 	install -D -m644 -- extra/icons/xcolor-512.png "$(DESTDIR)$(PREFIX)/share/icons/hicolor/512x512/apps/xcolor.png"
+	@# No scalable xcolor.svg: its icon is a conic-gradient colour wheel that
+	@# librsvg (GTK's SVG loader) can't render, so a scalable icon would show
+	@# blank. xcolor stays PNG-only; ncover (a plain path SVG) ships scalable.
 	@# Refresh desktop + icon caches on a real user install only — skip when
 	@# staging into DESTDIR (packaging), where package triggers own the caches.
 	@if [ -z "$(DESTDIR)" ] && command -v update-desktop-database >/dev/null 2>&1; then \
@@ -47,6 +82,7 @@ install-gui: target/release/ncover
 	install -D -m644 -- extra/icons/ncover-48.png "$(DESTDIR)$(PREFIX)/share/icons/hicolor/48x48/apps/ncover.png"
 	install -D -m644 -- extra/icons/ncover-256.png "$(DESTDIR)$(PREFIX)/share/icons/hicolor/256x256/apps/ncover.png"
 	install -D -m644 -- extra/icons/ncover-512.png "$(DESTDIR)$(PREFIX)/share/icons/hicolor/512x512/apps/ncover.png"
+	install -D -m644 -- icon.svg "$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/ncover.svg"
 	@if [ -z "$(DESTDIR)" ] && command -v update-desktop-database >/dev/null 2>&1; then \
 		update-desktop-database "$(PREFIX)/share/applications" >/dev/null 2>&1 || true; \
 	fi
@@ -74,11 +110,13 @@ uninstall:
 	rm -f -- "$(DESTDIR)$(PREFIX)/share/icons/hicolor/48x48/apps/xcolor.png"
 	rm -f -- "$(DESTDIR)$(PREFIX)/share/icons/hicolor/256x256/apps/xcolor.png"
 	rm -f -- "$(DESTDIR)$(PREFIX)/share/icons/hicolor/512x512/apps/xcolor.png"
+	rm -f -- "$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/ncover.svg"
 
 help:
 	@echo "Available make targets:"
 	@echo "  all           - Build xcolor CLI (default)"
 	@echo "  gui           - Build n.cover (ncover)"
+	@echo "  icons         - Regenerate hicolor PNGs from icon.svg / icon-xcolor.svg"
 	@echo "  install       - Install xcolor CLI + man + .desktop + icons"
 	@echo "  install-gui   - Install n.cover binary + .desktop"
 	@echo "  install-all   - install + install-gui"
